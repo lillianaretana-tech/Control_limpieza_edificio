@@ -79,7 +79,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.1</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.2</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
@@ -93,7 +93,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.1</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.2</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -119,9 +119,16 @@ async function emailLogin(){
 async function loadSignedUser(user){
  const msg=document.getElementById('authMsg');
  const {data:profile,error:pe}=await sb.from('user_profiles').select('display_name,global_role,active').eq('user_id',user.id).maybeSingle();
- const {data:member,error:me}=await sb.from('project_memberships').select('role,project_id,active,projects!inner(code)').eq('user_id',user.id).eq('projects.code','MCK').maybeSingle();
- if(pe||me||!profile||!member||!profile.active||!member.active){
-   await sb.auth.signOut(); msg.textContent='Este usuario no tiene acceso activo a McKinsey.'; return;
+ if(pe||!profile||!profile.active){
+   await sb.auth.signOut(); msg.textContent='No se encontró un perfil activo para este usuario.'; return;
+ }
+ let member=null;
+ if(profile.global_role!=='admin'){
+   const {data:m,error:me}=await sb.from('project_memberships').select('role,project_id,active').eq('user_id',user.id).eq('active',true).limit(1).maybeSingle();
+   if(me||!m){
+     await sb.auth.signOut(); msg.textContent='Este usuario no tiene acceso activo al proyecto.'; return;
+   }
+   member=m;
  }
  appUser={id:user.id,name:profile.display_name,email:user.email};
  appRole=profile.global_role==='admin'?'admin':member.role;
