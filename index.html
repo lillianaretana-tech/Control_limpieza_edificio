@@ -79,13 +79,17 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.2</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.3</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
 <section class="controls" id="mapControls">
  <div class="tabs" id="floorTabs"></div>
  <div class="acts" id="actTabs"></div>
+<div id="wholeFloorBar" style="margin-top:10px;display:none">
+  <button class="secondary" onclick="openWholeFloor()">▦ Programar piso completo</button>
+  <span style="font-size:12px;color:#68758a;margin-left:8px">Crea la programación por todas las zonas; después cada zona se registra por separado.</span>
+</div>
  <div class="legend"><span><i class="dot" style="background:#d94a4a"></i>Pendiente</span><span><i class="dot" style="background:#f2b134"></i>Programado</span><span><i class="dot" style="background:#2e9d63"></i>Realizado</span><span><i class="dot" style="background:#9aa6b2"></i>No aplica</span></div>
 </section>
 <section class="summary"><div class="stats" id="stats"></div><div class="hint">Toque un sector del mapa para registrar o actualizar el trabajo.</div></section>
@@ -93,7 +97,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.2</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.3</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -236,6 +240,38 @@ function renderStats(){
  polygonZones[floor].forEach(z=>c[getRec(z.name).status]++);
  $("#stats").innerHTML=`<div class="stat"><b>${c.done}</b><span>Realizados</span></div><div class="stat"><b>${c.pending}</b><span>Pendientes</span></div><div class="stat"><b>${c.scheduled}</b><span>Programados</span></div><div class="stat"><b>${c.na}</b><span>No aplica</span></div>`;
 }
+
+function openWholeFloor(){
+ if(mode!=="plan" || activity==="chairs") return;
+ selected=null; draftStatus=null; renderMap();
+ const actName=activities.find(a=>a[0]==activity)[1];
+ $("#side").innerHTML=`<h2>Piso ${floor} completo</h2>
+ <div class="empty"><b>${actName}</b> · Se programarán todas las zonas del piso. Al ejecutar, el personal marcará únicamente las zonas que realmente realizó.</div>
+ <div class="field"><label>Estado</label><select id="status"><option value="scheduled">Programado</option><option value="pending">Pendiente</option></select></div>
+ <div class="field"><label>Fecha programada</label><input id="date" type="date" value="${isoToday()}"></div>
+ <div class="field"><label>Responsable / turno</label><input id="person" placeholder="Puede dejarse general para el turno"></div>
+ <div class="field"><label>Observaciones</label><textarea id="notes" placeholder="Opcional"></textarea></div>
+ <button class="primary" onclick="saveWholeFloor()">Guardar piso completo</button>
+ <button class="secondary" onclick="resetSide()">Cancelar</button>
+ <div class="empty" style="margin-top:10px">Esto no convierte el piso en una sola tarea indivisible: cada sector conservará su propio estado.</div>`;
+}
+function saveWholeFloor(){
+ const date=$("#date").value;
+ if(!date){ alert("Seleccione la fecha programada."); return; }
+ const status=$("#status").value;
+ const person=$("#person").value.trim();
+ const notes=$("#notes").value.trim();
+ const when=new Date().toLocaleString("es-CR");
+ polygonZones[floor].forEach(z=>{
+   const old=getRec(z.name);
+   db.records[recKey(floor,activity,z.name)]={
+     ...old,status,date,person,notes
+   };
+   db.history.unshift({floor,activity,zone:z.name,status,person,when,scope:"piso_completo"});
+ });
+ db.history=db.history.slice(0,300); save();
+ renderAll(); resetSide();
+}
 function selectZone(name){
  selected=name;
  const r=getRec(name);
@@ -280,7 +316,11 @@ function couldNot(){
  renderMap(); $("#notes").focus();
 }
 function setFloor(f){clearTimeout(draftTimer);floor=f;selected=null;draftStatus=null;renderAll();resetSide()}
-function setAct(a){clearTimeout(draftTimer);activity=a;selected=null;draftStatus=null;renderAll();resetSide()}
+function setAct(a){
+ clearTimeout(draftTimer);activity=a;selected=null;draftStatus=null;renderAll();resetSide();
+ const wf=$("#wholeFloorBar");
+ if(wf) wf.style.display=(mode==="plan" && activity!=="chairs")?"block":"none";
+}
 
 function isoToday(){return new Date().toISOString().slice(0,10)}
 function effectiveStatus(r){
@@ -301,12 +341,21 @@ function renderToday(){
  ${jobs.length?jobs.map(j=>`<div class="todaycard ${j.eff}"><b>Piso ${j.f} · ${j.z}</b><small>${j.an} · ${j.r.date||"Sin fecha"}${j.r.person?" · "+esc(j.r.person):""}</small><button onclick="goJob('${j.f}','${j.a}','${j.z.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay trabajos programados o vencidos para hoy. ✓</div>'}</section>`;
 }
 function goJob(f,a,z){floor=f;activity=a;selected=z;draftStatus=getRec(z).status;renderAll();renderSide();document.querySelector(".mapcard").scrollIntoView({behavior:"smooth"})}
-function setMode(m){mode=m;$("#workMode").classList.toggle("active",m==="work");$("#planMode").classList.toggle("active",m==="plan");renderToday();$("#mapControls").style.display=m==="plan"?"block":"block"}
+function setMode(m){
+ if(m==="plan" && appRole==="funcionario") return;
+ mode=m;
+ $("#workMode").classList.toggle("active",m==="work");
+ $("#planMode").classList.toggle("active",m==="plan");
+ renderToday();
+ $("#mapControls").style.display="block";
+ const wf=$("#wholeFloorBar");
+ if(wf) wf.style.display=(m==="plan" && activity!=="chairs")?"block":"none";
+}
 
 function resetSide(){$("#side").innerHTML='<h2>Seleccione un sector</h2><div class="empty">Toque una zona del mapa para registrar el trabajo.</div>'}
 function renderAll(){renderTabs();renderMap();renderToday()}
 function labelStatus(s){return {pending:"Pendiente",scheduled:"Programado",done:"Realizado",na:"No aplica"}[s]}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 $("#today").textContent=new Date().toLocaleDateString("es-CR",{day:"2-digit",month:"short",year:"numeric"});
-renderAll();
+renderAll(); setMode(mode);
 </script></body></html>
