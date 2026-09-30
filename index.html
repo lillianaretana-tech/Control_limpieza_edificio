@@ -79,7 +79,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.3</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.4</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
@@ -87,7 +87,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="tabs" id="floorTabs"></div>
  <div class="acts" id="actTabs"></div>
 <div id="wholeFloorBar" style="margin-top:10px;display:none">
-  <button class="secondary" onclick="openWholeFloor()">▦ Programar piso completo</button>
+  <button class="secondary" type="button" onclick="openWholeFloor(); return false;">▦ Programar piso completo</button>
   <span style="font-size:12px;color:#68758a;margin-left:8px">Crea la programación por todas las zonas; después cada zona se registra por separado.</span>
 </div>
  <div class="legend"><span><i class="dot" style="background:#d94a4a"></i>Pendiente</span><span><i class="dot" style="background:#f2b134"></i>Programado</span><span><i class="dot" style="background:#2e9d63"></i>Realizado</span><span><i class="dot" style="background:#9aa6b2"></i>No aplica</span></div>
@@ -97,7 +97,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.3</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.4</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -245,7 +245,7 @@ function openWholeFloor(){
  if(mode!=="plan" || activity==="chairs") return;
  selected=null; draftStatus=null; renderMap();
  const actName=activities.find(a=>a[0]==activity)[1];
- $("#side").innerHTML=`<h2>Piso ${floor} completo</h2>
+ $("#side").innerHTML=`<h2>Programar piso ${floor} completo</h2>
  <div class="empty"><b>${actName}</b> · Se programarán todas las zonas del piso. Al ejecutar, el personal marcará únicamente las zonas que realmente realizó.</div>
  <div class="field"><label>Estado</label><select id="status"><option value="scheduled">Programado</option><option value="pending">Pendiente</option></select></div>
  <div class="field"><label>Fecha programada</label><input id="date" type="date" value="${isoToday()}"></div>
@@ -254,6 +254,7 @@ function openWholeFloor(){
  <button class="primary" onclick="saveWholeFloor()">Guardar piso completo</button>
  <button class="secondary" onclick="resetSide()">Cancelar</button>
  <div class="empty" style="margin-top:10px">Esto no convierte el piso en una sola tarea indivisible: cada sector conservará su propio estado.</div>`;
+ requestAnimationFrame(()=>$("#side").scrollIntoView({behavior:"smooth",block:"start"}));
 }
 function saveWholeFloor(){
  const date=$("#date").value;
