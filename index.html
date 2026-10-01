@@ -61,7 +61,12 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
 .reportrow{border:1px solid #e2e8f0;border-radius:12px;padding:11px;margin:8px 0;background:#fff}
 .reportrow small{display:block;color:#68758a;margin-top:4px}.reporttitle{display:flex;justify-content:space-between;gap:10px;align-items:center}
 @media(max-width:650px){.reportbar>*{width:100%}}
-.pzone.none{fill:rgba(160,170,180,.08);stroke:#8b98a8}.legend .noneDot{background:#fff;border:1px solid #9aa6b2}</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
+.pzone.none{fill:rgba(160,170,180,.08);stroke:#8b98a8}.legend .noneDot{background:#fff;border:1px solid #9aa6b2}</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+</head>
 <body>
 <div class="authgate" id="authgate">
  <div class="authbox">
@@ -85,9 +90,12 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.9</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v3.0</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
+<div style="max-width:1200px;margin:10px auto 0;display:flex;gap:8px;flex-wrap:wrap">
+ <button class="secondary" type="button" onclick="openReports('')" style="width:auto;margin:0">📋 Ver programación / reportes</button>
+</div>
 <section id="todayWork"></section>
 <section class="controls" id="mapControls">
  <div class="tabs" id="floorTabs"></div>
@@ -100,7 +108,8 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
 </section>
 <section class="summary"><div class="stats" id="stats"></div><div class="hint">Toque un sector del mapa para registrar o actualizar el trabajo.</div></section>
 <section class="summary" id="reportPanel" style="display:none">
- <div class="reporttitle"><h2 style="margin:0">Historial y Reportes</h2><button class="secondary" type="button" onclick="closeReports()" style="width:auto">Cerrar</button></div>
+ <div class="reporttitle"><h2 style="margin:0">Programación, Historial y Reportes</h2><button class="secondary" type="button" onclick="closeReports()" style="width:auto">Cerrar</button></div>
+ <div class="hint">Aquí puede consultar fechas futuras y pasadas. Los trabajos de piso completo se muestran como una sola programación, no cinco veces por sus zonas.</div>
  <div class="reportbar">
   <select id="rfStatus" onchange="renderReports()"><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="scheduled">Programados</option><option value="done">Realizados</option><option value="na">No aplica</option></select>
   <select id="rfFloor" onchange="renderReports()"><option value="">Todos los pisos</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select>
@@ -110,6 +119,11 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <input id="rfFrom" type="date" onchange="renderReports()" title="Desde">
   <input id="rfTo" type="date" onchange="renderReports()" title="Hasta">
  </div>
+ <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+  <button class="secondary" type="button" onclick="clearReportFilters()" style="width:auto;margin:0">Limpiar filtros</button>
+  <button class="secondary" type="button" onclick="exportReportExcel()" style="width:auto;margin:0">⬇ Excel</button>
+  <button class="secondary" type="button" onclick="exportReportPDF()" style="width:auto;margin:0">⬇ PDF</button>
+ </div>
  <div id="reportCount" class="hint"></div>
  <div id="reportRows"></div>
 </section>
@@ -117,7 +131,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.9</footer>
+<footer>Acceso conectado a Supabase · Datos operativos conectados a Supabase · LillyTech v3.0</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -348,22 +362,72 @@ function renderStats(){
 function currentRows(){
  return (db.tasks||[]).map(t=>({...t,activityName:(activities.find(x=>x[0]===t.activity)||["",t.activity])[1],status:dbToUiStatus(t.status)}));
 }
+function groupedReportRows(){
+ const raw=currentRows(), groups=new Map();
+ for(const r of raw){
+   const key=[r.date,r.floor,r.activity,r.status,r.assignedShiftId||"",r.assignedStaffId||"",r.person||"",r.scope||""].join("|");
+   if(!groups.has(key))groups.set(key,{...r,zones:[],zoneCount:0});
+   const g=groups.get(key); g.zones.push(r.zone); g.zoneCount++;
+ }
+ return [...groups.values()].map(g=>({...g,zoneLabel:g.scope==="piso_completo"&&g.zoneCount>=5?"Piso completo":g.zones.join(", ")}));
+}
 function openReports(status=""){
  $("#reportPanel").style.display="block";
- $("#rfStatus").value=status;
- $("#rfFloor").value=floor;
- $("#rfActivity").value=activity;
+ $("#rfStatus").value=status||"";
+ // El botón general de reportes NO limita automáticamente al piso/actividad actuales.
+ $("#rfFloor").value="";
+ $("#rfActivity").value="";
+ $("#rfShift").value="";
+ $("#rfFrom").value="";
+ $("#rfTo").value="";
  $("#rfPerson").innerHTML='<option value="">Todas las personas</option>'+meta.staff.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+ $("#rfPerson").value="";
  renderReports();
  requestAnimationFrame(()=>$("#reportPanel").scrollIntoView({behavior:"smooth",block:"start"}));
 }
 function closeReports(){ $("#reportPanel").style.display="none"; }
-function renderReports(){
+function clearReportFilters(){
+ ["rfStatus","rfFloor","rfActivity","rfShift","rfPerson","rfFrom","rfTo"].forEach(id=>$("#"+id).value="");
+ renderReports();
+}
+function filteredReportRows(){
  const st=$("#rfStatus").value, fl=$("#rfFloor").value, ac=$("#rfActivity").value, sh=$("#rfShift").value, pe=$("#rfPerson").value, fr=$("#rfFrom").value, to=$("#rfTo").value;
- let rows=currentRows().filter(r=>(!st||r.status===st)&&(!fl||r.floor===fl)&&(!ac||r.activity===ac)&&(!sh||r.shift===sh)&&(!pe||r.assignedStaffId===pe)&&(!fr||!r.date||r.date>=fr)&&(!to||!r.date||r.date<=to));
- rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||a.floor.localeCompare(b.floor));
- $("#reportCount").textContent=`${rows.length} registro${rows.length===1?"":"s"} encontrado${rows.length===1?"":"s"}.`;
- $("#reportRows").innerHTML=rows.length?rows.map(r=>`<div class="reportrow"><b>Piso ${r.floor} · ${esc(r.zone)}</b><small>${r.activityName} · ${labelStatus(r.status)}${r.date?" · "+r.date:""}${r.shift?" · "+esc(r.shift):""}${r.person?" · "+esc(r.person):""}</small>${r.notes?`<small>${esc(r.notes)}</small>`:""}<button class="secondary" style="margin-top:8px" onclick="goReportRow('${r.floor}','${r.activity}','${r.zone.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay registros con estos filtros.</div>';
+ let rows=groupedReportRows().filter(r=>(!st||r.status===st)&&(!fl||r.floor===fl)&&(!ac||r.activity===ac)&&(!sh||r.shift===sh)&&(!pe||r.assignedStaffId===pe)&&(!fr||!r.date||r.date>=fr)&&(!to||!r.date||r.date<=to));
+ rows.sort((a,b)=>(a.date||"").localeCompare(b.date||"")||a.floor.localeCompare(b.floor)||a.person.localeCompare(b.person));
+ return rows;
+}
+function renderReports(){
+ const rows=filteredReportRows();
+ $("#reportCount").textContent=`${rows.length} programación${rows.length===1?"":"es"} encontrada${rows.length===1?"":"s"}.`;
+ $("#reportRows").innerHTML=rows.length?rows.map(r=>`<div class="reportrow"><b>${r.date||"Sin fecha"} · Piso ${r.floor} · ${esc(r.zoneLabel)}</b><small>${r.activityName} · ${labelStatus(r.status)}${r.shift?" · "+esc(r.shift):""}${r.person?" · "+esc(r.person):" · Sin persona específica"}</small>${r.notes?`<small>${esc(r.notes)}</small>`:""}<button class="secondary" style="margin-top:8px" onclick="goReportRow('${r.floor}','${r.activity}','${r.zones[0].replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay programaciones con estos filtros.</div>';
+}
+function reportExportData(){
+ return filteredReportRows().map(r=>({
+  Fecha:r.date||"",Piso:r.floor,Zona:r.zoneLabel,Actividad:r.activityName,Estado:labelStatus(r.status),
+  Turno:r.shift||"",Responsable:r.person||"Sin persona específica",Observaciones:r.notes||""
+ }));
+}
+function exportReportExcel(){
+ const data=reportExportData(); if(!data.length){alert("No hay datos para exportar con estos filtros.");return;}
+ if(!window.XLSX){alert("No se pudo cargar el módulo de Excel.");return;}
+ const ws=XLSX.utils.json_to_sheet(data);
+ ws["!cols"]=[{wch:12},{wch:8},{wch:22},{wch:22},{wch:14},{wch:12},{wch:34},{wch:45}];
+ const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Programación");
+ XLSX.writeFile(wb,`MCK_Programacion_${isoToday()}.xlsx`);
+}
+function exportReportPDF(){
+ const data=reportExportData(); if(!data.length){alert("No hay datos para exportar con estos filtros.");return;}
+ if(!window.jspdf){alert("No se pudo cargar el módulo PDF.");return;}
+ const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:"landscape"});
+ doc.setFontSize(15); doc.text("MCK - Control de Limpieza",14,14);
+ doc.setFontSize(10); doc.text("Programación / Historial",14,21);
+ doc.autoTable({
+   startY:26,
+   head:[["Fecha","Piso","Zona","Actividad","Estado","Turno","Responsable","Observaciones"]],
+   body:data.map(x=>[x.Fecha,x.Piso,x.Zona,x.Actividad,x.Estado,x.Turno,x.Responsable,x.Observaciones]),
+   styles:{fontSize:7,cellPadding:2},headStyles:{fontStyle:"bold"}
+ });
+ doc.save(`MCK_Programacion_${isoToday()}.pdf`);
 }
 function goReportRow(f,a,z){
  closeReports(); floor=f; activity=a; selected=z; draftStatus=getRec(z).status; renderAll(); renderSide();
