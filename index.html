@@ -85,7 +85,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.7</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.9</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
@@ -117,7 +117,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.7</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.9</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -171,7 +171,7 @@ async function enterApp(){
   staffList=data||[];
  }catch(e){staffList=[];}
  try{ await loadOperationalData(); }
- catch(e){ console.error(e); alert("No se pudieron cargar los datos operativos desde la base. Revise la conexión."); }
+ catch(e){ console.error(e); alert("No se pudieron cargar los datos operativos. La conexión a Internet puede estar bien; el problema es la consulta a la base. Detalle: "+(e?.message||"error desconocido")); }
 }
 async function logoutApp(){
  await sb.auth.signOut(); appUser=null;appRole=null;
@@ -261,20 +261,26 @@ async function loadOperationalData(){
    sb.from("staff").select("id,full_name,shift_id,active").eq("project_id",p.id).eq("active",true).order("full_name")
  ]);
  if(fe||ae||se||pse)throw fe||ae||se||pse;
- meta.floors={};meta.zones={};meta.activities={};meta.shifts={};meta.staff=ps||[];
- (ss||[]).forEach(x=>meta.shifts[x.name]=x.id);
+ meta.floors={};meta.zones={};meta.activities={};meta.shifts={};
+ const shiftById={};
+ (ss||[]).forEach(x=>{meta.shifts[x.name]=x.id;shiftById[x.id]=x.name});
+ meta.staff=(ps||[]).map(x=>({...x,shiftName:shiftById[x.shift_id]||""}));
  (fs||[]).forEach(f=>{meta.floors[f.floor_code]=f.id;(f.zones||[]).forEach(z=>meta.zones[`${f.floor_code}|${z.name}`]=z.id)});
  (as||[]).forEach(a=>meta.activities[a.code]=a.id);
  const {data:ts,error:te}=await sb.from("tasks")
-   .select("id,task_date,status,notes,assigned_label,assigned_staff_id,assigned_shift_id,chairs_done,chairs_total,scope_type,floors(floor_code),zones(name),activities(code),shifts!tasks_assigned_shift_id_fkey(name)")
+   .select("id,task_date,status,notes,assigned_label,assigned_staff_id,assigned_shift_id,chairs_done,chairs_total,scope_type,floor_id,zone_id,activity_id")
    .eq("project_id",p.id).order("task_date",{ascending:false});
  if(te)throw te;
- db.tasks=(ts||[]).filter(t=>t.zones&&t.floors&&t.activities).map(t=>({
+ const floorCodeById=Object.fromEntries(Object.entries(meta.floors).map(([k,v])=>[v,k]));
+ const zoneNameById={}; Object.entries(meta.zones).forEach(([k,v])=>zoneNameById[v]=k.split("|").slice(1).join("|"));
+ const activityCodeById=Object.fromEntries(Object.entries(meta.activities).map(([k,v])=>[v,k]));
+ const shiftNameById=Object.fromEntries(Object.entries(meta.shifts).map(([k,v])=>[v,k]));
+ db.tasks=(ts||[]).map(t=>({
    id:t.id,date:t.task_date,status:t.status,notes:t.notes||"",person:t.assigned_label||"",
-   chairsDone:t.chairs_done,chairsTotal:t.chairs_total,scope:t.scope_type,assignedStaffId:t.assigned_staff_id,assignedShiftId:t.assigned_shift_id,shift:t.shifts?.name||"",
-   floor:String(t.floors.floor_code),zone:t.zones.name,
-   activity:({aspirado:"vacuum",lavado_alfombra:"carpet",lavado_sillas:"chairs"})[t.activities.code]
- }));
+   chairsDone:t.chairs_done,chairsTotal:t.chairs_total,scope:t.scope_type,assignedStaffId:t.assigned_staff_id,assignedShiftId:t.assigned_shift_id,shift:shiftNameById[t.assigned_shift_id]||"",
+   floor:String(floorCodeById[t.floor_id]||""),zone:zoneNameById[t.zone_id]||"",
+   activity:({aspirado:"vacuum",lavado_alfombra:"carpet",lavado_sillas:"chairs"})[activityCodeById[t.activity_id]]
+ })).filter(t=>t.floor&&t.zone&&t.activity);
  db.records={};
  renderAll();
 }
@@ -282,8 +288,12 @@ function shiftOptions(selected=""){
  return `<option value="">Seleccione turno</option>${["Día","Tarde","Noche"].map(n=>`<option value="${meta.shifts[n]||""}" ${selected===meta.shifts[n]?"selected":""}>${n}</option>`).join("")}`;
 }
 function staffOptions(shiftId="",selected=""){
- const people=meta.staff.filter(p=>!shiftId||p.shift_id===shiftId);
- return `<option value="">Sin persona específica</option>${people.map(p=>`<option value="${p.id}" ${selected===p.id?"selected":""}>${esc(p.full_name)}</option>`).join("")}`;
+ const shiftName=Object.keys(meta.shifts).find(n=>meta.shifts[n]===shiftId)||"";
+ let people=meta.staff.filter(p=>!shiftId || p.shift_id===shiftId || (shiftName && p.shiftName===shiftName));
+ // Si por alguna inconsistencia no se puede resolver el turno, nunca ocultamos todo el personal:
+ // mostramos la lista completa para permitir una asignación específica.
+ if(shiftId && people.length===0) people=meta.staff;
+ return `<option value="">Sin persona específica</option>${people.map(p=>`<option value="${p.id}" ${selected===p.id?"selected":""}>${esc(p.full_name)}${p.shiftName?" · "+esc(p.shiftName):""}</option>`).join("")}`;
 }
 function refreshStaffSelect(){
  const sh=$("#shift")?.value||"", el=$("#person"); if(!el)return;
