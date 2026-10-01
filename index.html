@@ -90,7 +90,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v3.0</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v3.1</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <div style="max-width:1200px;margin:10px auto 0;display:flex;gap:8px;flex-wrap:wrap">
@@ -131,7 +131,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos conectados a Supabase · LillyTech v3.0</footer>
+<footer>Acceso conectado a Supabase · Datos operativos conectados a Supabase · LillyTech v3.1</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -521,12 +521,39 @@ function effectiveStatus(r){
  if(r.status==="scheduled" && r.date && r.date<=isoToday()) return "pending";
  return r.status;
 }
+function todayJobGroups(){
+ const today=isoToday(), m=new Map();
+ (db.tasks||[]).filter(t=>t.date<=today&&!["realizado","cancelado","no_aplica"].includes(t.status)).forEach(t=>{
+  const key=[t.date,t.floor,t.activity,t.assignedShiftId||"",t.assignedStaffId||"",t.person||""].join("|");
+  if(!m.has(key))m.set(key,{key,date:t.date,floor:t.floor,activity:t.activity,shift:t.shift||"",person:t.person||"",assignedStaffId:t.assignedStaffId||"",tasks:[]});
+  m.get(key).tasks.push(t);
+ });
+ return [...m.values()];
+}
+function openCompleteGroup(key){
+ const g=todayJobGroups().find(x=>x.key===key); if(!g)return;
+ const an=(activities.find(x=>x[0]===g.activity)||["",g.activity])[1];
+ const ov=document.createElement("div"); ov.id="multiOverlay";
+ ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:9998;display:flex;align-items:flex-end;justify-content:center";
+ ov.innerHTML=`<div style="background:white;width:min(720px,100%);max-height:88vh;overflow:auto;border-radius:22px 22px 0 0;padding:20px;color:#142033"><h2 style="margin:0 0 5px">Registrar trabajo realizado</h2><div class="hint">${g.date} · Piso ${g.floor} · ${esc(an)}${g.shift?" · "+esc(g.shift):""}${g.person?" · "+esc(g.person):""}</div><div style="margin:15px 0;padding:12px;background:#f4f7fb;border-radius:14px"><label style="display:flex;gap:10px;align-items:center;font-weight:800"><input id="checkAllZones" type="checkbox" onchange="toggleAllZones(this.checked)" style="width:22px;height:22px"> Marcar todo el piso</label></div><div>${g.tasks.map(t=>`<label style="display:flex;gap:10px;align-items:center;padding:12px 4px;border-bottom:1px solid #e3e8ef"><input class="zoneCheck" type="checkbox" value="${t.id}" style="width:22px;height:22px"><b>${esc(t.zone)}</b></label>`).join("")}</div><div class="field" style="margin-top:14px"><label>Observación (opcional)</label><textarea id="multiNotes" rows="2"></textarea></div><div style="display:flex;gap:8px;margin-top:12px"><button class="secondary" onclick="closeMultiComplete()">Cancelar</button><button class="primary" onclick="saveMultiComplete('${key}')">Guardar seleccionados</button></div></div>`;
+ document.body.appendChild(ov);
+}
+function toggleAllZones(v){document.querySelectorAll("#multiOverlay .zoneCheck").forEach(x=>x.checked=v)}
+function closeMultiComplete(){document.querySelector("#multiOverlay")?.remove()}
+async function saveMultiComplete(key){
+ const g=todayJobGroups().find(x=>x.key===key); if(!g)return;
+ const ids=[...document.querySelectorAll("#multiOverlay .zoneCheck:checked")].map(x=>x.value);
+ if(!ids.length){alert("Seleccione al menos una parte del piso.");return;}
+ const notes=$("#multiNotes")?.value.trim()||"";
+ try{
+  for(const id of ids){const t=g.tasks.find(x=>x.id===id);const patch={status:"realizado"};if(notes)patch.notes=[t.notes,notes].filter(Boolean).join(" · ");const {error}=await sb.from("tasks").update(patch).eq("id",id);if(error)throw error}
+  closeMultiComplete();await loadOperationalData();
+ }catch(e){alert("No se pudo registrar el trabajo: "+(e?.message||"error desconocido"))}
+}
 function renderToday(){
  const box=$("#todayWork"); if(mode!=="work"){box.innerHTML="";return}
- let jobs=(db.tasks||[]).filter(t=>t.date<=isoToday()&&!["realizado","cancelado","no_aplica"].includes(t.status))
-   .map(t=>({f:t.floor,a:t.activity,an:(activities.find(x=>x[0]===t.activity)||["",t.activity])[1],z:t.zone,r:{date:t.date,person:t.person},eff:dbToUiStatus(t.status)}));
- box.innerHTML=`<section class="summary"><h2 style="margin:0 0 8px">Trabajo de hoy <span class="badgeToday">${jobs.length}</span></h2>
- ${jobs.length?jobs.map(j=>`<div class="todaycard ${j.eff}"><b>Piso ${j.f} · ${j.z}</b><small>${j.an} · ${j.r.date}${j.r.person?" · "+esc(j.r.person):""}</small><button onclick="goJob('${j.f}','${j.a}','${j.z.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay trabajos programados o vencidos para hoy. ✓</div>'}</section>`;
+ const groups=todayJobGroups();
+ box.innerHTML=`<section class="summary"><h2 style="margin:0 0 8px">Trabajo de hoy <span class="badgeToday">${groups.length}</span></h2>${groups.length?groups.map(g=>{const an=(activities.find(x=>x[0]===g.activity)||["",g.activity])[1];return `<div class="todaycard scheduled"><b>Piso ${g.floor} · ${an}</b><small>${g.date}${g.shift?" · "+esc(g.shift):""}${g.person?" · "+esc(g.person):""}</small><small>${g.tasks.length} parte${g.tasks.length===1?"":"s"} pendiente${g.tasks.length===1?"":"s"}</small><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button onclick="openCompleteGroup('${g.key}')">✓ Registrar realizado</button><button class="secondary" onclick="goJob('${g.floor}','${g.activity}','${g.tasks[0].zone.replaceAll("'","\\'")}')">Ver en mapa</button></div></div>`}).join(""):'<div class="empty">No hay trabajos programados o vencidos para hoy. ✓</div>'}</section>`;
 }
 function goJob(f,a,z){floor=f;activity=a;selected=z;draftStatus=getRec(z).status;renderAll();renderSide();document.querySelector(".mapcard").scrollIntoView({behavior:"smooth"})}
 function setMode(m){
