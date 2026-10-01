@@ -61,7 +61,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
 .reportrow{border:1px solid #e2e8f0;border-radius:12px;padding:11px;margin:8px 0;background:#fff}
 .reportrow small{display:block;color:#68758a;margin-top:4px}.reporttitle{display:flex;justify-content:space-between;gap:10px;align-items:center}
 @media(max-width:650px){.reportbar>*{width:100%}}
-</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
+.pzone.none{fill:rgba(160,170,180,.08);stroke:#8b98a8}.legend .noneDot{background:#fff;border:1px solid #9aa6b2}</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
 <body>
 <div class="authgate" id="authgate">
  <div class="authbox">
@@ -85,7 +85,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.5</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.6</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
@@ -96,7 +96,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <button class="secondary" type="button" onclick="openWholeFloor(); return false;">▦ Programar piso completo</button>
   <span style="font-size:12px;color:#68758a;margin-left:8px">Crea la programación por todas las zonas; después cada zona se registra por separado.</span>
 </div>
- <div class="legend"><span><i class="dot" style="background:#d94a4a"></i>Pendiente</span><span><i class="dot" style="background:#f2b134"></i>Programado</span><span><i class="dot" style="background:#2e9d63"></i>Realizado</span><span><i class="dot" style="background:#9aa6b2"></i>No aplica</span></div>
+ <div class="legend"><span><i class="dot noneDot"></i>Sin programar</span><span><i class="dot" style="background:#d94a4a"></i>Pendiente</span><span><i class="dot" style="background:#f2b134"></i>Programado</span><span><i class="dot" style="background:#2e9d63"></i>Realizado</span><span><i class="dot" style="background:#9aa6b2"></i>No aplica</span></div>
 </section>
 <section class="summary"><div class="stats" id="stats"></div><div class="hint">Toque un sector del mapa para registrar o actualizar el trabajo.</div></section>
 <section class="summary" id="reportPanel" style="display:none">
@@ -115,7 +115,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.5</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.6</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -168,6 +168,8 @@ async function enterApp(){
   const {data}=await sb.from('staff').select('id,full_name,login_name,app_role').eq('active',true).order('full_name');
   staffList=data||[];
  }catch(e){staffList=[];}
+ try{ await loadOperationalData(); }
+ catch(e){ console.error(e); alert("No se pudieron cargar los datos operativos desde la base. Revise la conexión."); }
 }
 async function logoutApp(){
  await sb.auth.signOut(); appUser=null;appRole=null;
@@ -225,12 +227,65 @@ const polygonZones={
 
 const activities=[["vacuum","Aspirado"],["carpet","Lavado de alfombra"],["chairs","Lavado de sillas"]];
 let floor="3", activity="vacuum", selected=null, draftStatus=null, draftTimer=null, mode="work";
-const KEY="mck-cleaning-v1";
-let db=JSON.parse(localStorage.getItem(KEY)||'{"records":{},"history":[]}');
+const KEY="mck-cleaning-v1"; // solo compatibilidad; ya no es fuente de verdad
+let db={records:{},history:[],tasks:[]};
+let meta={projectId:null,floors:{},zones:{},activities:{}};
 const $=s=>document.querySelector(s);
 function recKey(f,a,z){return `${f}|${a}|${z}`}
-function getRec(z){return db.records[recKey(floor,activity,z)]||{status:"pending",date:"",person:"",chairsDone:"",chairsTotal:"",notes:""}}
-function save(){localStorage.setItem(KEY,JSON.stringify(db))}
+function uiToDbStatus(x){return {scheduled:"programado",pending:"pendiente",done:"realizado",na:"no_aplica"}[x]||"programado"}
+function dbToUiStatus(x){return {programado:"scheduled",pendiente:"pending",parcial:"pending",realizado:"done",no_realizado:"pending",cancelado:"na",no_aplica:"na"}[x]||"scheduled"}
+function activityCode(a){return {vacuum:"aspirado",carpet:"lavado_alfombra",chairs:"lavado_sillas"}[a]}
+function chooseTask(f,a,z){
+ const today=isoToday();
+ const rows=(db.tasks||[]).filter(t=>t.floor===String(f)&&t.activity===a&&t.zone===z&&t.status!=="cancelado");
+ const future=rows.filter(t=>t.date>=today).sort((x,y)=>x.date.localeCompare(y.date));
+ if(future.length)return future[0];
+ return rows.sort((x,y)=>y.date.localeCompare(x.date))[0]||null;
+}
+function getRec(z){
+ const t=chooseTask(floor,activity,z);
+ if(!t)return {status:"none",date:"",person:"",chairsDone:"",chairsTotal:"",notes:""};
+ return {status:dbToUiStatus(t.status),date:t.date,person:t.person||"",chairsDone:t.chairsDone??"",chairsTotal:t.chairsTotal??"",notes:t.notes||"",taskId:t.id};
+}
+function save(){/* v2.6: persistencia operativa únicamente en Supabase */}
+async function loadOperationalData(){
+ const {data:p,error:pe}=await sb.from("projects").select("id").eq("code","MCK").single();
+ if(pe||!p) throw pe||new Error("Proyecto MCK no disponible");
+ meta.projectId=p.id;
+ const [{data:fs,error:fe},{data:as,error:ae}]=await Promise.all([
+   sb.from("floors").select("id,floor_code,zones(id,name)").eq("project_id",p.id),
+   sb.from("activities").select("id,code,name").eq("project_id",p.id)
+ ]);
+ if(fe||ae)throw fe||ae;
+ meta.floors={};meta.zones={};meta.activities={};
+ (fs||[]).forEach(f=>{meta.floors[f.floor_code]=f.id;(f.zones||[]).forEach(z=>meta.zones[`${f.floor_code}|${z.name}`]=z.id)});
+ (as||[]).forEach(a=>meta.activities[a.code]=a.id);
+ const {data:ts,error:te}=await sb.from("tasks")
+   .select("id,task_date,status,notes,assigned_label,chairs_done,chairs_total,scope_type,floors(floor_code),zones(name),activities(code)")
+   .eq("project_id",p.id).order("task_date",{ascending:false});
+ if(te)throw te;
+ db.tasks=(ts||[]).filter(t=>t.zones&&t.floors&&t.activities).map(t=>({
+   id:t.id,date:t.task_date,status:t.status,notes:t.notes||"",person:t.assigned_label||"",
+   chairsDone:t.chairs_done,chairsTotal:t.chairs_total,scope:t.scope_type,
+   floor:String(t.floors.floor_code),zone:t.zones.name,
+   activity:({aspirado:"vacuum",lavado_alfombra:"carpet",lavado_sillas:"chairs"})[t.activities.code]
+ }));
+ db.records={};
+ renderAll();
+}
+async function upsertTask({f,a,z,status,date,person,notes,chairsDone=null,chairsTotal=null,scope="zonas"}){
+ const payload={
+   project_id:meta.projectId,floor_id:meta.floors[String(f)],zone_id:meta.zones[`${f}|${z}`],
+   activity_id:meta.activities[activityCode(a)],task_date:date,status:uiToDbStatus(status),
+   assigned_label:person||null,notes:notes||null,scope_type:scope,
+   chairs_done:chairsDone===""?null:chairsDone,chairs_total:chairsTotal===""?null:chairsTotal
+ };
+ const existing=(db.tasks||[]).find(t=>t.floor===String(f)&&t.activity===a&&t.zone===z&&t.date===date&&t.status!=="cancelado");
+ let res;
+ if(existing) res=await sb.from("tasks").update(payload).eq("id",existing.id).select("id").single();
+ else res=await sb.from("tasks").insert(payload).select("id").single();
+ if(res.error)throw res.error;
+}
 function renderTabs(){
  $("#floorTabs").innerHTML=[3,4,5,6,7].map(f=>`<button class="pill ${floor==f?'active':''}" onclick="setFloor('${f}')">Piso ${f}</button>`).join("");
  $("#actTabs").innerHTML=activities.map(([k,n])=>`<button class="act ${activity==k?'active':''}" onclick="setAct('${k}')">${n}</button>`).join("");
@@ -254,19 +309,14 @@ function renderMap(){
  $("#mapwrap").appendChild(svg); renderStats();
 }
 function renderStats(){
- let c={pending:0,scheduled:0,done:0,na:0};
- polygonZones[floor].forEach(z=>c[getRec(z.name).status]++);
+ let c={pending:0,scheduled:0,done:0,na:0,none:0};
+ polygonZones[floor].forEach(z=>{const st=getRec(z.name).status;c[st]=(c[st]||0)+1});
  $("#stats").innerHTML=`<div class="stat" onclick="openReports('done')"><b>${c.done}</b><span>Realizados</span></div><div class="stat" onclick="openReports('pending')"><b>${c.pending}</b><span>Pendientes</span></div><div class="stat" onclick="openReports('scheduled')"><b>${c.scheduled}</b><span>Programados</span></div><div class="stat" onclick="openReports('na')"><b>${c.na}</b><span>No aplica</span></div>`;
 }
 
 
 function currentRows(){
- let rows=[];
- [3,4,5,6,7].forEach(f=>activities.forEach(([a,an])=>polygonZones[String(f)].forEach(z=>{
-   const r=db.records[`${f}|${a}|${z.name}`];
-   if(r) rows.push({floor:String(f),activity:a,activityName:an,zone:z.name,...r});
- })));
- return rows;
+ return (db.tasks||[]).map(t=>({...t,activityName:(activities.find(x=>x[0]===t.activity)||["",t.activity])[1],status:dbToUiStatus(t.status)}));
 }
 function openReports(status=""){
  $("#reportPanel").style.display="block";
@@ -303,22 +353,16 @@ function openWholeFloor(){
  <div class="empty" style="margin-top:10px">Esto no convierte el piso en una sola tarea indivisible: cada sector conservará su propio estado.</div>`;
  requestAnimationFrame(()=>$("#side").scrollIntoView({behavior:"smooth",block:"start"}));
 }
-function saveWholeFloor(){
+async function saveWholeFloor(){
  const date=$("#date").value;
  if(!date){ alert("Seleccione la fecha programada."); return; }
- const status=$("#status").value;
- const person=$("#person").value.trim();
- const notes=$("#notes").value.trim();
- const when=new Date().toLocaleString("es-CR");
- polygonZones[floor].forEach(z=>{
-   const old=getRec(z.name);
-   db.records[recKey(floor,activity,z.name)]={
-     ...old,status,date,person,notes
-   };
-   db.history.unshift({floor,activity,zone:z.name,status,person,when,scope:"piso_completo"});
- });
- db.history=db.history.slice(0,300); save();
- renderAll(); resetSide();
+ const status=$("#status").value, person=$("#person").value.trim(), notes=$("#notes").value.trim();
+ const btn=$("#side .primary"); if(btn){btn.disabled=true;btn.textContent="Guardando…";}
+ try{
+   for(const z of polygonZones[floor]) await upsertTask({f:floor,a:activity,z:z.name,status,date,person,notes,scope:"piso_completo"});
+   await loadOperationalData(); resetSide();
+   alert("Piso completo guardado en la base de datos.");
+ }catch(e){console.error(e);alert("No se pudo guardar la programación. No se hicieron cambios locales."); if(btn){btn.disabled=false;btn.textContent="Guardar piso completo";}}
 }
 function selectZone(name){
  selected=name;
@@ -348,13 +392,15 @@ function renderSide(){
    draftTimer=setTimeout(()=>{draftStatus=null;renderMap()},120000);
  };
 }
-function saveRecord(forceDone=false){
+async function saveRecord(forceDone=false){
  if(!selected)return;
- const old=getRec(selected);
- const r={status:forceDone?"done":$("#status").value,date:forceDone?new Date().toISOString().slice(0,10):$("#date").value,person:$("#person").value.trim(),notes:$("#notes").value.trim(),chairsDone:activity==="chairs"?$("#chairsDone").value:"",chairsTotal:activity==="chairs"?$("#chairsTotal").value:""};
- db.records[recKey(floor,activity,selected)]=r;
- db.history.unshift({floor,activity,zone:selected,status:r.status,person:r.person,when:new Date().toLocaleString("es-CR")});
- db.history=db.history.slice(0,300); save(); clearTimeout(draftTimer); draftStatus=null; renderMap(); renderSide();
+ const r={status:forceDone?"done":$("#status").value,date:forceDone?isoToday():$("#date").value,person:$("#person").value.trim(),notes:$("#notes").value.trim(),chairsDone:activity==="chairs"?$("#chairsDone").value:"",chairsTotal:activity==="chairs"?$("#chairsTotal").value:""};
+ if(!r.date){alert("Seleccione la fecha.");return;}
+ try{
+   await upsertTask({f:floor,a:activity,z:selected,...r,scope:"zonas"});
+   clearTimeout(draftTimer);draftStatus=null;
+   await loadOperationalData();renderSide();
+ }catch(e){console.error(e);alert("No se pudo guardar en la base de datos.");}
 }
 function markDone(){saveRecord(true)}
 function couldNot(){
@@ -377,16 +423,10 @@ function effectiveStatus(r){
 }
 function renderToday(){
  const box=$("#todayWork"); if(mode!=="work"){box.innerHTML="";return}
- let jobs=[];
- [3,4,5,6,7].forEach(f=>activities.forEach(([a,an])=>polygonZones[String(f)].forEach(z=>{
-   const r=db.records[`${f}|${a}|${z.name}`];
-   if(!r)return;
-   const eff=effectiveStatus(r);
-   if((r.status==="scheduled"&&r.date<=isoToday()) || (eff==="pending"&&r.date && r.date<=isoToday()))
-     jobs.push({f:String(f),a,an,z:z.name,r,eff});
- })));
- box.innerHTML=`<section class="summary"><h2 style="margin:0 0 8px">Trabajo de hoy <span class="badgeToday">${jobs.filter(j=>j.eff!=="done").length}</span></h2>
- ${jobs.length?jobs.map(j=>`<div class="todaycard ${j.eff}"><b>Piso ${j.f} · ${j.z}</b><small>${j.an} · ${j.r.date||"Sin fecha"}${j.r.person?" · "+esc(j.r.person):""}</small><button onclick="goJob('${j.f}','${j.a}','${j.z.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay trabajos programados o vencidos para hoy. ✓</div>'}</section>`;
+ let jobs=(db.tasks||[]).filter(t=>t.date<=isoToday()&&!["realizado","cancelado","no_aplica"].includes(t.status))
+   .map(t=>({f:t.floor,a:t.activity,an:(activities.find(x=>x[0]===t.activity)||["",t.activity])[1],z:t.zone,r:{date:t.date,person:t.person},eff:dbToUiStatus(t.status)}));
+ box.innerHTML=`<section class="summary"><h2 style="margin:0 0 8px">Trabajo de hoy <span class="badgeToday">${jobs.length}</span></h2>
+ ${jobs.length?jobs.map(j=>`<div class="todaycard ${j.eff}"><b>Piso ${j.f} · ${j.z}</b><small>${j.an} · ${j.r.date}${j.r.person?" · "+esc(j.r.person):""}</small><button onclick="goJob('${j.f}','${j.a}','${j.z.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay trabajos programados o vencidos para hoy. ✓</div>'}</section>`;
 }
 function goJob(f,a,z){floor=f;activity=a;selected=z;draftStatus=getRec(z).status;renderAll();renderSide();document.querySelector(".mapcard").scrollIntoView({behavior:"smooth"})}
 function setMode(m){
