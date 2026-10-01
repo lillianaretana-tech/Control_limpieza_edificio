@@ -90,7 +90,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v3.1</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v3.2</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <div style="max-width:1200px;margin:10px auto 0;display:flex;gap:8px;flex-wrap:wrap">
@@ -131,7 +131,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos conectados a Supabase · LillyTech v3.1</footer>
+<footer>Acceso conectado a Supabase · Datos operativos conectados a Supabase · LillyTech v3.2</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -408,11 +408,36 @@ function reportExportData(){
  }));
 }
 function exportReportExcel(){
- const data=reportExportData(); if(!data.length){alert("No hay datos para exportar con estos filtros.");return;}
+ const data=reportExportData();
+ if(!data.length){alert("No hay datos para exportar con estos filtros.");return;}
  if(!window.XLSX){alert("No se pudo cargar el módulo de Excel.");return;}
- const ws=XLSX.utils.json_to_sheet(data);
- ws["!cols"]=[{wch:12},{wch:8},{wch:22},{wch:22},{wch:14},{wch:12},{wch:34},{wch:45}];
- const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Programación");
+
+ const wb=XLSX.utils.book_new();
+ const headers=["Fecha","Piso","Zona","Actividad","Estado","Turno","Responsable","Observaciones"];
+ const widths=[{wch:13},{wch:8},{wch:28},{wch:22},{wch:15},{wch:12},{wch:38},{wch:50}];
+
+ function addSheet(name,rows){
+   if(!rows.length)return;
+   const ws=XLSX.utils.json_to_sheet(rows,{header:headers});
+   ws["!cols"]=widths;
+   ws["!autofilter"]={ref:`A1:H${rows.length+1}`};
+   ws["!freeze"]={xSplit:0,ySplit:1,topLeftCell:"A2",activePane:"bottomLeft",state:"frozen"};
+   XLSX.utils.book_append_sheet(wb,ws,name);
+ }
+
+ // Primera hoja: visión completa de todo lo que devuelve el filtro actual.
+ addSheet("Resumen general",data);
+
+ // Hojas separadas por actividad para que el cliente no tenga que filtrar manualmente.
+ const sheets=[
+   ["Aspirado","Aspirado"],
+   ["Lavado de alfombra","Lavado de alfombra"],
+   ["Lavado de sillas","Lavado de sillas"]
+ ];
+ sheets.forEach(([sheetName,activity])=>{
+   addSheet(sheetName,data.filter(r=>r.Actividad===activity));
+ });
+
  XLSX.writeFile(wb,`MCK_Programacion_${isoToday()}.xlsx`);
 }
 function exportReportPDF(){
