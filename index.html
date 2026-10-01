@@ -85,7 +85,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <div class="authmsg" id="authMsg"></div>
  </div>
 </div>
-<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.6</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
+<header><div class="row"><div><h1>MCK · Control de Limpieza</h1><div class="ver">LillyTech · v2.7</div></div><div style="display:flex;align-items:center;gap:12px"><div id="today"></div><div class="userchip hidden" id="userchip"><span id="whoami"></span><button onclick="logoutApp()">Salir</button></div></div></div></header>
 <div class="wrap">
 <div class="modebar"><button class="modebtn active" id="workMode" onclick="setMode('work')">Trabajo de hoy</button><button class="modebtn" id="planMode" onclick="setMode('plan')">Planificación / Supervisión</button></div>
 <section id="todayWork"></section>
@@ -105,6 +105,8 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
   <select id="rfStatus" onchange="renderReports()"><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="scheduled">Programados</option><option value="done">Realizados</option><option value="na">No aplica</option></select>
   <select id="rfFloor" onchange="renderReports()"><option value="">Todos los pisos</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select>
   <select id="rfActivity" onchange="renderReports()"><option value="">Todas las actividades</option><option value="vacuum">Aspirado</option><option value="carpet">Lavado de alfombra</option><option value="chairs">Lavado de sillas</option></select>
+  <select id="rfShift" onchange="renderReports()"><option value="">Todos los turnos</option><option>Día</option><option>Tarde</option><option>Noche</option></select>
+  <select id="rfPerson" onchange="renderReports()"><option value="">Todas las personas</option></select>
   <input id="rfFrom" type="date" onchange="renderReports()" title="Desde">
   <input id="rfTo" type="date" onchange="renderReports()" title="Hasta">
  </div>
@@ -115,7 +117,7 @@ footer{text-align:center;color:#78869a;font-size:12px;padding:18px}.hint{font-si
  <div class="mapcard"><div class="mapwrap" id="mapwrap"><img id="mapimg" alt="Plano del piso"></div></div>
  <aside class="side" id="side"><h2>Seleccione un sector</h2><div class="empty">Elija una zona directamente en el mapa. Luego podrá indicar estado, fecha, responsable, cantidad de sillas y observaciones.</div></aside>
 </div>
-<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.6</footer>
+<footer>Acceso conectado a Supabase · Datos operativos del mapa aún en modo piloto local · LillyTech v2.7</footer>
 </div>
 <script>
 const SUPABASE_URL='https://ixehmbxobsiahkzebdzd.supabase.co';
@@ -229,7 +231,7 @@ const activities=[["vacuum","Aspirado"],["carpet","Lavado de alfombra"],["chairs
 let floor="3", activity="vacuum", selected=null, draftStatus=null, draftTimer=null, mode="work";
 const KEY="mck-cleaning-v1"; // solo compatibilidad; ya no es fuente de verdad
 let db={records:{},history:[],tasks:[]};
-let meta={projectId:null,floors:{},zones:{},activities:{}};
+let meta={projectId:null,floors:{},zones:{},activities:{},shifts:{},staff:[]};
 const $=s=>document.querySelector(s);
 function recKey(f,a,z){return `${f}|${a}|${z}`}
 function uiToDbStatus(x){return {scheduled:"programado",pending:"pendiente",done:"realizado",na:"no_aplica"}[x]||"programado"}
@@ -252,32 +254,50 @@ async function loadOperationalData(){
  const {data:p,error:pe}=await sb.from("projects").select("id").eq("code","MCK").single();
  if(pe||!p) throw pe||new Error("Proyecto MCK no disponible");
  meta.projectId=p.id;
- const [{data:fs,error:fe},{data:as,error:ae}]=await Promise.all([
+ const [{data:fs,error:fe},{data:as,error:ae},{data:ss,error:se},{data:ps,error:pse}]=await Promise.all([
    sb.from("floors").select("id,floor_code,zones(id,name)").eq("project_id",p.id),
-   sb.from("activities").select("id,code,name").eq("project_id",p.id)
+   sb.from("activities").select("id,code,name").eq("project_id",p.id),
+   sb.from("shifts").select("id,name,sort_order").eq("project_id",p.id).order("sort_order"),
+   sb.from("staff").select("id,full_name,shift_id,active").eq("project_id",p.id).eq("active",true).order("full_name")
  ]);
- if(fe||ae)throw fe||ae;
- meta.floors={};meta.zones={};meta.activities={};
+ if(fe||ae||se||pse)throw fe||ae||se||pse;
+ meta.floors={};meta.zones={};meta.activities={};meta.shifts={};meta.staff=ps||[];
+ (ss||[]).forEach(x=>meta.shifts[x.name]=x.id);
  (fs||[]).forEach(f=>{meta.floors[f.floor_code]=f.id;(f.zones||[]).forEach(z=>meta.zones[`${f.floor_code}|${z.name}`]=z.id)});
  (as||[]).forEach(a=>meta.activities[a.code]=a.id);
  const {data:ts,error:te}=await sb.from("tasks")
-   .select("id,task_date,status,notes,assigned_label,chairs_done,chairs_total,scope_type,floors(floor_code),zones(name),activities(code)")
+   .select("id,task_date,status,notes,assigned_label,assigned_staff_id,assigned_shift_id,chairs_done,chairs_total,scope_type,floors(floor_code),zones(name),activities(code),shifts!tasks_assigned_shift_id_fkey(name)")
    .eq("project_id",p.id).order("task_date",{ascending:false});
  if(te)throw te;
  db.tasks=(ts||[]).filter(t=>t.zones&&t.floors&&t.activities).map(t=>({
    id:t.id,date:t.task_date,status:t.status,notes:t.notes||"",person:t.assigned_label||"",
-   chairsDone:t.chairs_done,chairsTotal:t.chairs_total,scope:t.scope_type,
+   chairsDone:t.chairs_done,chairsTotal:t.chairs_total,scope:t.scope_type,assignedStaffId:t.assigned_staff_id,assignedShiftId:t.assigned_shift_id,shift:t.shifts?.name||"",
    floor:String(t.floors.floor_code),zone:t.zones.name,
    activity:({aspirado:"vacuum",lavado_alfombra:"carpet",lavado_sillas:"chairs"})[t.activities.code]
  }));
  db.records={};
  renderAll();
 }
-async function upsertTask({f,a,z,status,date,person,notes,chairsDone=null,chairsTotal=null,scope="zonas"}){
+function shiftOptions(selected=""){
+ return `<option value="">Seleccione turno</option>${["Día","Tarde","Noche"].map(n=>`<option value="${meta.shifts[n]||""}" ${selected===meta.shifts[n]?"selected":""}>${n}</option>`).join("")}`;
+}
+function staffOptions(shiftId="",selected=""){
+ const people=meta.staff.filter(p=>!shiftId||p.shift_id===shiftId);
+ return `<option value="">Sin persona específica</option>${people.map(p=>`<option value="${p.id}" ${selected===p.id?"selected":""}>${esc(p.full_name)}</option>`).join("")}`;
+}
+function refreshStaffSelect(){
+ const sh=$("#shift")?.value||"", el=$("#person"); if(!el)return;
+ const keep=el.value; el.innerHTML=staffOptions(sh,keep);
+ if(![...el.options].some(o=>o.value===keep))el.value="";
+}
+function selectedStaffName(){
+ const el=$("#person"); return el&&el.value ? el.options[el.selectedIndex].text : "";
+}
+async function upsertTask({f,a,z,status,date,person="",staffId=null,shiftId=null,notes,chairsDone=null,chairsTotal=null,scope="zonas"}){
  const payload={
    project_id:meta.projectId,floor_id:meta.floors[String(f)],zone_id:meta.zones[`${f}|${z}`],
    activity_id:meta.activities[activityCode(a)],task_date:date,status:uiToDbStatus(status),
-   assigned_label:person||null,notes:notes||null,scope_type:scope,
+   assigned_label:person||null,assigned_staff_id:staffId||null,assigned_shift_id:shiftId||null,notes:notes||null,scope_type:scope,
    chairs_done:chairsDone===""?null:chairsDone,chairs_total:chairsTotal===""?null:chairsTotal
  };
  const existing=(db.tasks||[]).find(t=>t.floor===String(f)&&t.activity===a&&t.zone===z&&t.date===date&&t.status!=="cancelado");
@@ -323,16 +343,17 @@ function openReports(status=""){
  $("#rfStatus").value=status;
  $("#rfFloor").value=floor;
  $("#rfActivity").value=activity;
+ $("#rfPerson").innerHTML='<option value="">Todas las personas</option>'+meta.staff.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
  renderReports();
  requestAnimationFrame(()=>$("#reportPanel").scrollIntoView({behavior:"smooth",block:"start"}));
 }
 function closeReports(){ $("#reportPanel").style.display="none"; }
 function renderReports(){
- const st=$("#rfStatus").value, fl=$("#rfFloor").value, ac=$("#rfActivity").value, fr=$("#rfFrom").value, to=$("#rfTo").value;
- let rows=currentRows().filter(r=>(!st||r.status===st)&&(!fl||r.floor===fl)&&(!ac||r.activity===ac)&&(!fr||!r.date||r.date>=fr)&&(!to||!r.date||r.date<=to));
+ const st=$("#rfStatus").value, fl=$("#rfFloor").value, ac=$("#rfActivity").value, sh=$("#rfShift").value, pe=$("#rfPerson").value, fr=$("#rfFrom").value, to=$("#rfTo").value;
+ let rows=currentRows().filter(r=>(!st||r.status===st)&&(!fl||r.floor===fl)&&(!ac||r.activity===ac)&&(!sh||r.shift===sh)&&(!pe||r.assignedStaffId===pe)&&(!fr||!r.date||r.date>=fr)&&(!to||!r.date||r.date<=to));
  rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||a.floor.localeCompare(b.floor));
  $("#reportCount").textContent=`${rows.length} registro${rows.length===1?"":"s"} encontrado${rows.length===1?"":"s"}.`;
- $("#reportRows").innerHTML=rows.length?rows.map(r=>`<div class="reportrow"><b>Piso ${r.floor} · ${esc(r.zone)}</b><small>${r.activityName} · ${labelStatus(r.status)}${r.date?" · "+r.date:""}${r.person?" · "+esc(r.person):""}</small>${r.notes?`<small>${esc(r.notes)}</small>`:""}<button class="secondary" style="margin-top:8px" onclick="goReportRow('${r.floor}','${r.activity}','${r.zone.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay registros con estos filtros.</div>';
+ $("#reportRows").innerHTML=rows.length?rows.map(r=>`<div class="reportrow"><b>Piso ${r.floor} · ${esc(r.zone)}</b><small>${r.activityName} · ${labelStatus(r.status)}${r.date?" · "+r.date:""}${r.shift?" · "+esc(r.shift):""}${r.person?" · "+esc(r.person):""}</small>${r.notes?`<small>${esc(r.notes)}</small>`:""}<button class="secondary" style="margin-top:8px" onclick="goReportRow('${r.floor}','${r.activity}','${r.zone.replaceAll("'","\\'")}')">Ver en mapa</button></div>`).join(""):'<div class="empty">No hay registros con estos filtros.</div>';
 }
 function goReportRow(f,a,z){
  closeReports(); floor=f; activity=a; selected=z; draftStatus=getRec(z).status; renderAll(); renderSide();
@@ -346,7 +367,8 @@ function openWholeFloor(){
  <div class="empty"><b>${actName}</b> · Se programarán todas las zonas del piso. Al ejecutar, el personal marcará únicamente las zonas que realmente realizó.</div>
  <div class="field"><label>Estado</label><select id="status"><option value="scheduled">Programado</option><option value="pending">Pendiente</option></select></div>
  <div class="field"><label>Fecha programada</label><input id="date" type="date" value="${isoToday()}"></div>
- <div class="field"><label>Responsable / turno</label><input id="person" placeholder="Puede dejarse general para el turno"></div>
+ <div class="field"><label>Turno</label><select id="shift" onchange="refreshStaffSelect()">${shiftOptions()}</select></div>
+ <div class="field"><label>Responsable</label><select id="person">${staffOptions()}</select><div class="hint">Puede dejarse sin persona específica y asignarse solo al turno.</div></div>
  <div class="field"><label>Observaciones</label><textarea id="notes" placeholder="Opcional"></textarea></div>
  <button class="primary" onclick="saveWholeFloor()">Guardar piso completo</button>
  <button class="secondary" onclick="resetSide()">Cancelar</button>
@@ -356,10 +378,11 @@ function openWholeFloor(){
 async function saveWholeFloor(){
  const date=$("#date").value;
  if(!date){ alert("Seleccione la fecha programada."); return; }
- const status=$("#status").value, person=$("#person").value.trim(), notes=$("#notes").value.trim();
+ const status=$("#status").value, shiftId=$("#shift").value, staffId=$("#person").value||null, person=selectedStaffName(), notes=$("#notes").value.trim();
+ if(!shiftId){alert("Seleccione el turno.");return;}
  const btn=$("#side .primary"); if(btn){btn.disabled=true;btn.textContent="Guardando…";}
  try{
-   for(const z of polygonZones[floor]) await upsertTask({f:floor,a:activity,z:z.name,status,date,person,notes,scope:"piso_completo"});
+   for(const z of polygonZones[floor]) await upsertTask({f:floor,a:activity,z:z.name,status,date,person,staffId,shiftId,notes,scope:"piso_completo"});
    await loadOperationalData(); resetSide();
    alert("Piso completo guardado en la base de datos.");
  }catch(e){console.error(e);alert("No se pudo guardar la programación. No se hicieron cambios locales."); if(btn){btn.disabled=false;btn.textContent="Guardar piso completo";}}
@@ -378,7 +401,8 @@ function renderSide(){
  $("#side").innerHTML=`<h2>Piso ${floor} · ${selected}</h2><div class="empty">${actName} · <b>Sector seleccionado</b>. El cambio de color se muestra de inmediato; queda definitivo al guardar.</div>
  <div class="field"><label>Estado</label><select id="status"><option value="pending">Pendiente</option><option value="scheduled">Programado</option><option value="done">Realizado</option><option value="na">No aplica</option></select></div>
  <div class="field"><label>Fecha programada / realizada</label><input id="date" type="date" value="${r.date||''}"></div>
- <div class="field"><label>Responsable</label><input id="person" placeholder="Nombre" value="${esc(r.person||appUser?.name||'')}"></div>
+ <div class="field"><label>Turno</label><select id="shift" onchange="refreshStaffSelect()">${shiftOptions((chooseTask(floor,activity,selected)||{}).assignedShiftId||"")}</select></div>
+ <div class="field"><label>Responsable</label><select id="person">${staffOptions((chooseTask(floor,activity,selected)||{}).assignedShiftId||"", (chooseTask(floor,activity,selected)||{}).assignedStaffId||"")}</select></div>
  ${activity==="chairs"?`<div class="field"><label>Sillas realizadas / total</label><div style="display:flex;gap:7px"><input id="chairsDone" type="number" min="0" placeholder="Realizadas" value="${r.chairsDone||''}"><input id="chairsTotal" type="number" min="0" placeholder="Total" value="${r.chairsTotal||''}"></div></div>`:""}
  <div class="field"><label>Observaciones</label><textarea id="notes" placeholder="Opcional">${esc(r.notes||'')}</textarea></div>
  <button class="primary" onclick="saveRecord()">Guardar actualización</button><button class="secondary" onclick="markDone()">✓ Marcar realizado ahora</button>
@@ -394,8 +418,10 @@ function renderSide(){
 }
 async function saveRecord(forceDone=false){
  if(!selected)return;
- const r={status:forceDone?"done":$("#status").value,date:forceDone?isoToday():$("#date").value,person:$("#person").value.trim(),notes:$("#notes").value.trim(),chairsDone:activity==="chairs"?$("#chairsDone").value:"",chairsTotal:activity==="chairs"?$("#chairsTotal").value:""};
+ const shiftId=$("#shift").value, staffId=$("#person").value||null;
+ const r={status:forceDone?"done":$("#status").value,date:forceDone?isoToday():$("#date").value,person:selectedStaffName(),staffId,shiftId,notes:$("#notes").value.trim(),chairsDone:activity==="chairs"?$("#chairsDone").value:"",chairsTotal:activity==="chairs"?$("#chairsTotal").value:""};
  if(!r.date){alert("Seleccione la fecha.");return;}
+ if(!shiftId){alert("Seleccione el turno.");return;}
  try{
    await upsertTask({f:floor,a:activity,z:selected,...r,scope:"zonas"});
    clearTimeout(draftTimer);draftStatus=null;
